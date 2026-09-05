@@ -1,41 +1,37 @@
 # just bpb panel
 
-ابزارهای **secureVpn** روی BPB — **بدون دست زدن به Worker پنل**.
+ابزارهای **secureVpn** برای BPB — **بدون تغییر Worker پنل**.
 
-پنل تو (دست‌نخورده بماند):
-https://rcnf9ofm8yrbsdx1.instagram-monitor-bot.workers.dev/4g3vkGn6-0kuc/panel
+## وضعیت پروژه
 
-## چرا ریپوی جدا؟
+| خواسته | وضعیت |
+|--------|--------|
+| پینگ بهتر / تعداد کانفیگ کمتر | انجام (تنظیمات پنل) |
+| اسم secureVpn روی ساب/کانفیگ | انجام (Worker استاتیک + اسکریپت) |
+| پرچم و کشور | انجام در اسکریپت (برای IP؛ دامنه CF = Cloudflare) |
+| بسته گیگ + انقضا | کد کامل (`package-worker`) — باید Deploy کنی |
+| ربات تلگرام | عمداً انجام نشده (گفتی بعداً) |
+| دست نزن به پنل BPB v5 | رعایت شده |
 
-ریپوی `secureVpn-BPB` شلوغ و آزمایشی شد.  
-این ریپو فقط فایل‌های لازم و تمیز است.
+ریپو: https://github.com/MohamadHoseinMaleki/just-bpb-panel  
+پنل: https://rcnf9ofm8yrbsdx1.instagram-monitor-bot.workers.dev/4g3vkGn6-0kuc/panel
 
-## بخش‌ها
-
-| پوشه | کار |
-|------|-----|
-| `scripts/rewrite-sub.ps1` | دانلود ساب BPB → اسم `secureVpn` + **پرچم و کشور** |
-| `package-worker/` | ساب بسته‌ای: **تاریخ انقضا + سقف حجم (soft)** |
-| `docs/` | راهنما |
-
-## محدودیت مهم BPB
-
-BPB یک UUID مشترک دارد. ترافیک واقعی هر کاربر روی کلودفلر جداگانه قابل‌اندازه‌گیری دقیق نیست.  
-بستهٔ «گیگ» اینجا یعنی **سقف تقریبی بایت سرو‌شده از لینک ساب** + **تاریخ انقضا**.  
-برای گیگ واقعی per-user بعداً پنل چندکاربره (مثل Hiddify/Marzban) لازم است.
-
-## شروع سریع
-
-### ۱) اسم کانفیگ با پرچم
+## مسیر کامل اسم + پرچم
 
 ```powershell
-cd path\to\just-bpb-panel
-powershell -ExecutionPolicy Bypass -File .\scripts\rewrite-sub.ps1 `
-  -SubUrl "https://rcnf9ofm8yrbsdx1.instagram-monitor-bot.workers.dev/4g3vkGn6-0kuc/sub/raw?app=xray"
+git clone https://github.com/MohamadHoseinMaleki/just-bpb-panel.git
+cd just-bpb-panel
+
+powershell -ExecutionPolicy Bypass -File .\scripts\rewrite-sub.ps1 -SubUrl "https://rcnf9ofm8yrbsdx1.instagram-monitor-bot.workers.dev/4g3vkGn6-0kuc/sub/raw?app=xray"
+
+powershell -ExecutionPolicy Bypass -File .\scripts\generate-static-worker.ps1
 ```
 
-خروجی: `output\securevpn-sub.txt` → داخل Worker استاتیک `autumn-waterfall-dce9` بگذار.
+فایل `output\static-worker.js` را در Worker `autumn-waterfall-dce9` Paste و Deploy کن.
 
-### ۲) بسته فروش
+لینک مشتری:
+https://autumn-waterfall-dce9.instagram-monitor-bot.workers.dev/
 
-ببین: [docs/PACKAGES.md](docs/PACKAGES.md)
+## مسیر بسته فروش
+
+راهنما: [docs/PACKAGES.md](docs/PACKAGES.md)
