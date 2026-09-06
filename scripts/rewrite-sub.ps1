@@ -1,28 +1,22 @@
-# secureVpn sub rewriter with country flag
-# powershell -ExecutionPolicy Bypass -File .\scripts\rewrite-sub.ps1 -SubUrl "https://.../sub/raw?app=xray"
+# secureVpn: rename configs to: secureVpn | FLAG Country
+# powershell -ExecutionPolicy Bypass -File .\scripts\rewrite-sub.ps1 -SubUrl "URL"
 
 param(
   [Parameter(Mandatory = $true)]
   [string]$SubUrl,
   [string]$OutFile = "output\securevpn-sub.txt",
-  [string]$ProfileName = "secureVpn",
-  [switch]$NoGeo
+  [string]$ProfileName = "secureVpn"
 )
 
 $ErrorActionPreference = "Stop"
-
 $dir = Split-Path -Parent $OutFile
-if ($dir -and -not (Test-Path $dir)) {
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-}
+if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 
-# ISO country -> emoji flag
 function Get-Flag([string]$code) {
   if (-not $code -or $code.Length -ne 2) { return "" }
   $code = $code.ToUpper()
-  $chars = $code.ToCharArray()
   $sb = New-Object System.Text.StringBuilder
-  foreach ($c in $chars) {
+  foreach ($c in $code.ToCharArray()) {
     $cp = 0x1F1E6 + [int][char]$c - [int][char]'A'
     [void]$sb.Append([char]::ConvertFromUtf32($cp))
   }
@@ -30,37 +24,30 @@ function Get-Flag([string]$code) {
 }
 
 $geoCache = @{}
-
-function Resolve-Geo([string]$hostOrIp) {
-  if ($NoGeo) { return $null }
-  if ([string]::IsNullOrWhiteSpace($hostOrIp)) { return $null }
-  if ($geoCache.ContainsKey($hostOrIp)) { return $geoCache[$hostOrIp] }
-
-  # only plain IPv4 for free API
-  if ($hostOrIp -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
-    $geoCache[$hostOrIp] = $null
-    return $null
-  }
-
+function Resolve-Geo([string]$ip) {
+  if ([string]::IsNullOrWhiteSpace($ip)) { return $null }
+  if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { return $null }
+  if ($geoCache.ContainsKey($ip)) { return $geoCache[$ip] }
   try {
-    $url = "http://ip-api.com/json/$hostOrIp`?fields=status,country,countryCode"
-    $resp = Invoke-RestMethod -Uri $url -TimeoutSec 5
-    Start-Sleep -Milliseconds 200
+    $url = "http://ip-api.com/json/$ip`?fields=status,country,countryCode"
+    $resp = Invoke-RestMethod -Uri $url -TimeoutSec 6
+    Start-Sleep -Milliseconds 250
     if ($resp.status -eq "success") {
       $flag = Get-Flag $resp.countryCode
-      $label = if ($flag) { "$flag $($resp.country)" } else { $resp.country }
-      $geoCache[$hostOrIp] = $label
+      $label = if ($flag) { "$flag $($resp.country)" } else { [string]$resp.country }
+      $geoCache[$ip] = $label
       return $label
     }
-  } catch { }
-  $geoCache[$hostOrIp] = $null
+  } catch {}
+  $geoCache[$ip] = $null
   return $null
 }
 
 function Get-HostFromLine([string]$line) {
   $base = ($line -split "#")[0]
-  if ($base -match '@([^:/?]+)') { return $Matches[1] }
-  if ($base -match '://([^:/?]+)') { return $Matches[1] }
+  # vless://uuid@host:port
+  if ($base -match '@([^:/?]+)') { return $Matches[1].Trim("[]") }
+  if ($base -match '://([^:/?]+)') { return $Matches[1].Trim("[]") }
   return ""
 }
 
@@ -103,19 +90,28 @@ function Get-Name([string]$remark, [int]$index, [string]$line) {
   $geo = Resolve-Geo $hostName
   if ($geo) { return "$ProfileName | $geo" }
 
-  if ($hostName -match 'workers\.dev|pages\.dev') {
+  $r = [string]$remark
+
+  # Prefer structured BPB remark types
+  if ($r -match 'Clean\s*IP') {
+    if ($hostName -and $hostName -notmatch 'workers\.dev|pages\.dev') {
+      return "$ProfileName | Clean $hostName"
+    }
+    return "$ProfileName | Clean IP"
+  }
+  if ($r -match 'Domain' -or $hostName -match 'workers\.dev|pages\.dev') {
     return "$ProfileName | Cloudflare"
   }
-
-  $r = [string]$remark
-  if ($r -match 'Clean\s*IP') { return "$ProfileName | Clean IP" }
-  if ($r -match 'Domain') { return "$ProfileName | Cloudflare" }
   if ($r -match 'IPv6') { return "$ProfileName | IPv6" }
-  if ($r -match 'IPv4') { return "$ProfileName | IPv4" }
+  if ($r -match 'IPv4') {
+    # try again if host was domain-like; already tried geo
+    return "$ProfileName | IPv4"
+  }
   if ($r -match 'Best\s*Ping') { return "$ProfileName | Best Ping" }
   if ($r -match 'Upstream') { return "$ProfileName | Upstream" }
 
-  if ($hostName -and $hostName -notmatch '^\d') {
+  if ($hostName) {
+    if ($hostName -match 'workers\.dev|pages\.dev') { return "$ProfileName | Cloudflare" }
     $short = ($hostName -split '\.')[0]
     if ($short) { return "$ProfileName | $short" }
   }
@@ -136,6 +132,7 @@ foreach ($line in $lines) {
     $old = $line.Substring($idx + 1)
     try { $old = [Uri]::UnescapeDataString($old) } catch {}
     $name = Get-Name $old $i $line
+    Write-Host ("  [{0}] {1}" -f $i, $name)
     $outLines.Add($base + "#" + [Uri]::EscapeDataString($name))
     continue
   }
@@ -146,6 +143,7 @@ foreach ($line in $lines) {
       $json = (Decode-Base64Utf8 $b64) | ConvertFrom-Json
       $old = [string]$json.ps
       $json.ps = Get-Name $old $i $line
+      Write-Host ("  [{0}] {1}" -f $i, $json.ps)
       $outLines.Add("vmess://" + (Encode-Base64Utf8 ($json | ConvertTo-Json -Compress)))
     } catch {
       $outLines.Add($line)
@@ -162,5 +160,4 @@ if ($wasBase64) { $body = Encode-Base64Utf8 $body }
 $fullPath = Join-Path (Get-Location) $OutFile
 [System.IO.File]::WriteAllText($fullPath, $body, [System.Text.UTF8Encoding]::new($false))
 Write-Host "OK wrote $fullPath"
-Write-Host "Configs: $($outLines.Count)"
-Write-Host "Geo lookups cached: $($geoCache.Count)"
+Write-Host "Configs: $($outLines.Count) | Geo: $($geoCache.Count)"
